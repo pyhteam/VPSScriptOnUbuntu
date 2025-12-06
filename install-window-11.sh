@@ -36,21 +36,30 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-# 2. BẬT REPO VÀ CÀI ĐẶT GÓI (SỬA LỖI THIẾU GÓI)
+# 2. BẬT REPO VÀ CÀI ĐẶT GÓI
 echo -e "${YELLOW}[1/6] Cài đặt các gói phần mềm cần thiết...${NC}"
 
-# Bật repo universe để tải cabextract
-add-apt-repository universe -y > /dev/null 2>&1
-apt update -y
+# Tắt hỏi xác nhận cho apt
+export DEBIAN_FRONTEND=noninteractive
 
-# Cài đặt đầy đủ (Đã sửa tên cabinet-extract -> cabextract)
-apt install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virtinst swtpm swtpm-tools ovmf wget \
-aria2 cabextract wimtools chntpw genisoimage unzip file
+# Bật repo universe
+echo -e "  -> Bật repository universe..."
+add-apt-repository universe -y > /dev/null 2>&1
+
+echo -e "  -> Đang cập nhật danh sách gói (apt update)..."
+apt-get update -y -qq
+
+echo -e "  -> Đang cài đặt các gói cần thiết (có thể mất 2-5 phút)..."
+apt-get install -y -qq qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virtinst swtpm swtpm-tools ovmf wget \
+aria2 cabextract wimtools chntpw genisoimage unzip file curl jq
 
 check_error "Không thể cài đặt các gói phần mềm. Kiểm tra kết nối mạng."
+echo -e "  ${GREEN}-> Cài đặt gói hoàn tất!${NC}"
 
 # Kích hoạt dịch vụ ảo hóa
-systemctl enable --now libvirtd
+echo -e "  -> Kích hoạt dịch vụ libvirtd..."
+systemctl enable --now libvirtd > /dev/null 2>&1
+echo -e "  ${GREEN}-> Dịch vụ ảo hóa đã sẵn sàng!${NC}"
 
 # 3. TẢI VIRTIO DRIVER
 echo -e "${YELLOW}[2/6] Kiểm tra VirtIO Driver...${NC}"
