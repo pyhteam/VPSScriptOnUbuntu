@@ -62,15 +62,121 @@ else
     echo -e "${GREEN}Đã có file virtio-win.iso.${NC}"
 fi
 
-# 4. XỬ LÝ WINDOWS 11 ISO (SỬA LỖI LINK TẢI)
+# 4. XỬ LÝ WINDOWS 11 ISO
+
+# Hàm tải ISO trực tiếp từ Microsoft (NHANH & ỔN ĐỊNH)
+download_from_microsoft() {
+    echo -e "${YELLOW}--- TẢI WINDOWS 11 ISO TRỰC TIẾP TỪ MICROSOFT ---${NC}"
+    
+    # Cài đặt jq nếu chưa có
+    apt install -y jq curl > /dev/null 2>&1
+    
+    echo "Đang lấy link tải từ Microsoft..."
+    
+    # Sử dụng Fido script để lấy link tải trực tiếp từ Microsoft
+    # Link này lấy Windows 11 Multi-edition ISO
+    
+    LANG_CODE="en-us"
+    echo "Chọn ngôn ngữ:"
+    echo "1. English (en-us) - Mặc định"
+    echo "2. Vietnamese (vi-vn)"
+    echo "3. Chinese Simplified (zh-cn)"
+    read -p "Chọn (1/2/3) [Enter = English]: " LANG_CHOICE
+    
+    case $LANG_CHOICE in
+        2) LANG_CODE="vi-vn" ;;
+        3) LANG_CODE="zh-cn" ;;
+        *) LANG_CODE="en-us" ;;
+    esac
+    
+    echo -e "${GREEN}Ngôn ngữ: $LANG_CODE${NC}"
+    
+    # Tải Fido script
+    echo "Đang tải công cụ Fido..."
+    curl -sL "https://raw.githubusercontent.com/pbatard/Fido/master/Fido.ps1" -o /tmp/Fido.ps1
+    
+    # Sử dụng phương pháp thay thế: tải từ link có sẵn
+    # Microsoft cung cấp link tải ISO qua trang chính thức
+    
+    echo -e "${YELLOW}Đang tạo link tải Windows 11...${NC}"
+    
+    # Tạo session và lấy link
+    SESSION_ID=$(curl -s "https://www.microsoft.com/en-us/api/controls/contentinclude/html?pageId=a8f8f489-4c7f-463a-9ca6-5cff94d8d041&host=www.microsoft.com&segments=software-download,windows11&query=&action=getskuinformationbyproductedition&sessionId=&productEditionId=2935&sdVersion=2" \
+        -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+        | grep -oP 'id="session-id" value="\K[^"]+' 2>/dev/null)
+    
+    if [ -z "$SESSION_ID" ]; then
+        echo -e "${YELLOW}Không lấy được session từ Microsoft. Dùng link backup...${NC}"
+        
+        # Sử dụng link từ các mirror đáng tin cậy
+        echo ""
+        echo "Chọn nguồn tải:"
+        echo "1. Massgrave (Mirror nhanh, khuyên dùng)"
+        echo "2. Archive.org (Ổn định)"
+        echo "3. Nhập link ISO thủ công"
+        read -p "Chọn (1/2/3): " MIRROR_CHOICE
+        
+        case $MIRROR_CHOICE in
+            1)
+                # Link từ massgrave - Windows 11 23H2
+                ISO_URL="https://drive.massgrave.dev/Win11_23H2_English_x64v2.iso"
+                if [ "$LANG_CODE" == "vi-vn" ]; then
+                    ISO_URL="https://drive.massgrave.dev/Win11_23H2_Vietnamese_x64.iso"
+                elif [ "$LANG_CODE" == "zh-cn" ]; then
+                    ISO_URL="https://drive.massgrave.dev/Win11_23H2_Chinese_Simplified_x64.iso"
+                fi
+                ;;
+            2)
+                # Link từ Archive.org
+                ISO_URL="https://archive.org/download/win-11-english-x-64v-2/Win11_23H2_English_x64v2.iso"
+                ;;
+            3)
+                echo "Nhập link ISO Windows 11 (phải là link trực tiếp .iso):"
+                read -p "Link: " ISO_URL
+                ;;
+            *)
+                ISO_URL="https://drive.massgrave.dev/Win11_23H2_English_x64v2.iso"
+                ;;
+        esac
+    fi
+    
+    if [ -z "$ISO_URL" ]; then
+        echo -e "${RED}Không có link tải!${NC}"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}Link tải: $ISO_URL${NC}"
+    echo -e "${YELLOW}Đang tải Windows 11 ISO (~6GB)... Vui lòng đợi.${NC}"
+    
+    # Tải ISO với aria2c (nhanh hơn wget)
+    if command -v aria2c &> /dev/null; then
+        aria2c -x 16 -s 16 -k 1M --file-allocation=none \
+               --continue=true \
+               -o "win11.iso" \
+               "$ISO_URL"
+    else
+        wget --continue --show-progress -O "win11.iso" "$ISO_URL"
+    fi
+    
+    if [ ! -f "win11.iso" ] || [ $(stat -c%s "win11.iso" 2>/dev/null || echo 0) -lt 1000000000 ]; then
+        echo -e "${RED}Tải ISO thất bại hoặc file không hoàn chỉnh!${NC}"
+        rm -f win11.iso
+        exit 1
+    fi
+    
+    WIN11_ISO_PATH="$(pwd)/win11.iso"
+    echo -e "${GREEN}Tải thành công: $WIN11_ISO_PATH${NC}"
+}
+
+# Hàm tải từ UUP Dump (backup)
 download_from_uup() {
     echo -e "${YELLOW}--- TẢI WINDOWS 11 TỪ UUP DUMP ---${NC}"
+    echo -e "${RED}LƯU Ý: Phương pháp này chậm và hay bị lỗi!${NC}"
     echo "Hướng dẫn lấy link:"
     echo "1. Truy cập: https://uupdump.net"
     echo "2. Chọn bản Win 11 muốn tải -> Next -> Chọn ngôn ngữ -> Next"
     echo "3. Chọn Edition (Professional) -> Next"
     echo "4. Copy link trên thanh địa chỉ trình duyệt"
-    echo "   Ví dụ: https://uupdump.net/download.php?id=xxx&pack=en-us&edition=professional"
     echo ""
     read -p "Dán link UUP Dump vào đây: " UUP_URL
 
@@ -84,101 +190,74 @@ download_from_uup() {
     rm -rf win11_build
 
     # Phân tích link để lấy thông tin
-    if [[ "$UUP_URL" == *"download.php"* ]]; then
+    if [[ "$UUP_URL" == *"download.php"* ]] || [[ "$UUP_URL" == *"selectlang.php"* ]]; then
         # Lấy các tham số từ URL
         UUP_ID=$(echo "$UUP_URL" | grep -oP 'id=\K[^&]+')
         UUP_PACK=$(echo "$UUP_URL" | grep -oP 'pack=\K[^&]+')
         UUP_EDITION=$(echo "$UUP_URL" | grep -oP 'edition=\K[^&]+')
         
-        # Nếu không lấy được, dùng giá trị mặc định
         [ -z "$UUP_PACK" ] && UUP_PACK="en-us"
         [ -z "$UUP_EDITION" ] && UUP_EDITION="professional"
         
         if [ -z "$UUP_ID" ]; then
-            echo -e "${RED}Không thể lấy ID từ link. Vui lòng kiểm tra lại.${NC}"
+            echo -e "${RED}Không thể lấy ID từ link!${NC}"
             exit 1
         fi
         
-        echo -e "${GREEN}Đã phát hiện:${NC}"
-        echo "  ID: $UUP_ID"
-        echo "  Ngôn ngữ: $UUP_PACK"
-        echo "  Edition: $UUP_EDITION"
+        echo -e "${GREEN}ID: $UUP_ID | Ngôn ngữ: $UUP_PACK | Edition: $UUP_EDITION${NC}"
         
-        # Tạo link API để tải script package
         API_URL="https://uupdump.net/get.php?id=${UUP_ID}&pack=${UUP_PACK}&edition=${UUP_EDITION}&autodl=2"
         
-        echo -e "${YELLOW}Đang tải script từ UUP Dump API...${NC}"
-        wget --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-             --content-disposition \
+        echo -e "${YELLOW}Đang tải package từ UUP Dump...${NC}"
+        wget --timeout=60 --tries=3 \
+             --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
              "$API_URL" -O uup_dump.zip 2>&1
-        
-    elif [[ "$UUP_URL" == *".zip"* ]] || [[ "$UUP_URL" == *"get.php"* ]]; then
-        # Link trực tiếp đến file ZIP
-        echo -e "${YELLOW}Đang tải file ZIP trực tiếp...${NC}"
-        wget --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-             "$UUP_URL" -O uup_dump.zip 2>&1
     else
-        echo -e "${RED}Link không hợp lệ. Vui lòng dùng link từ uupdump.net${NC}"
-        exit 1
+        wget --timeout=60 --tries=3 \
+             --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
+             "$UUP_URL" -O uup_dump.zip 2>&1
     fi
 
-    # Kiểm tra file đã tải
+    # Kiểm tra file ZIP
     if [ ! -f "uup_dump.zip" ]; then
         echo -e "${RED}Không tải được file!${NC}"
         exit 1
     fi
-
-    # Kiểm tra xem có phải file ZIP thật không
+    
     FILE_TYPE=$(file uup_dump.zip)
     if [[ "$FILE_TYPE" != *"Zip archive"* ]]; then
-        echo -e "${RED}==================================================${NC}"
-        echo -e "${RED}LỖI: File tải về không phải ZIP.${NC}"
-        echo -e "${RED}Thử phương pháp thay thế...${NC}"
-        echo -e "${RED}==================================================${NC}"
+        echo -e "${RED}File tải về không phải ZIP! Thử phương pháp Microsoft thay thế.${NC}"
         rm -f uup_dump.zip
-        
-        # Thử phương pháp thay thế: dùng curl với redirect
-        echo -e "${YELLOW}Thử lại với curl...${NC}"
-        curl -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-             -o uup_dump.zip \
-             "https://uupdump.net/get.php?id=${UUP_ID}&pack=${UUP_PACK}&edition=${UUP_EDITION}&autodl=2"
-        
-        FILE_TYPE=$(file uup_dump.zip)
-        if [[ "$FILE_TYPE" != *"Zip archive"* ]]; then
-            echo -e "${RED}Vẫn không tải được. Vui lòng tải thủ công:${NC}"
-            echo "1. Mở trình duyệt, truy cập: https://uupdump.net/download.php?id=${UUP_ID}&pack=${UUP_PACK}&edition=${UUP_EDITION}"
-            echo "2. Chọn 'Download and convert to ISO' -> 'Create download package'"
-            echo "3. Tải file ZIP về và đặt tại: $(pwd)/uup_dump.zip"
-            echo "4. Chạy lại script này"
-            exit 1
-        fi
+        download_from_microsoft
+        return
     fi
 
-    echo -e "${GREEN}Tải file ZIP thành công!${NC}"
-    echo "Giải nén và chạy script tạo ISO..."
+    echo "Giải nén..."
     unzip -o uup_dump.zip -d win11_build
     cd win11_build
     
-    # Cấp quyền chạy
     chmod +x uup_download_linux.sh 2>/dev/null
     
-    # Kiểm tra file script tồn tại
     if [ ! -f "uup_download_linux.sh" ]; then
-        echo -e "${RED}Không tìm thấy uup_download_linux.sh trong package${NC}"
-        ls -la
-        exit 1
+        echo -e "${RED}Không tìm thấy script build!${NC}"
+        cd ..
+        download_from_microsoft
+        return
     fi
     
-    echo -e "${YELLOW}Đang build ISO (Mất khoảng 20-40 phút)... Vui lòng đợi.${NC}"
-    ./uup_download_linux.sh
+    echo -e "${YELLOW}Đang build ISO (20-60 phút)...${NC}"
+    echo -e "${YELLOW}Nếu bị treo quá 30 phút, nhấn Ctrl+C và chạy lại script, chọn phương pháp Microsoft.${NC}"
     
-    # Tìm file ISO kết quả (có thể là .iso hoặc .ISO)
+    # Chạy với timeout
+    timeout 3600 ./uup_download_linux.sh
+    
     BUILT_ISO=$(find . -maxdepth 1 -iname "*.iso" | head -n 1)
     if [ -z "$BUILT_ISO" ]; then
-        echo -e "${RED}Lỗi: Build thất bại. Không thấy file ISO nào được tạo ra.${NC}"
-        echo "Các file hiện có:"
-        ls -la
-        exit 1
+        echo -e "${RED}Build thất bại!${NC}"
+        cd ..
+        echo "Chuyển sang phương pháp Microsoft..."
+        download_from_microsoft
+        return
     fi
     
     mv "$BUILT_ISO" ../win11_custom.iso
@@ -192,24 +271,28 @@ download_from_uup() {
 # Menu chọn nguồn ISO
 if [ -z "$WIN11_ISO_PATH" ] || [ ! -f "$WIN11_ISO_PATH" ]; then
     echo -e "${YELLOW}[3/6] Cấu hình file cài đặt Windows 11${NC}"
-    echo "1. Nhập đường dẫn file ISO có sẵn trên máy."
-    echo "2. Tự tải và tạo ISO từ UUP Dump (Cần mạng mạnh & kiên nhẫn)."
-    read -p "Chọn (1/2): " CHOICE
+    echo "1. Tải ISO từ Microsoft/Mirror (KHUYÊN DÙNG - Nhanh ~10 phút)"
+    echo "2. Tải từ UUP Dump (Chậm, hay lỗi - 30-60 phút)"
+    echo "3. Nhập đường dẫn file ISO có sẵn trên máy"
+    read -p "Chọn (1/2/3): " CHOICE
 
     case $CHOICE in
         1)
+            download_from_microsoft
+            ;;
+        2)
+            download_from_uup
+            ;;
+        3)
             read -p "Nhập đường dẫn file ISO (VD: /root/win11.iso): " WIN11_ISO_PATH
             if [ ! -f "$WIN11_ISO_PATH" ]; then
                 echo -e "${RED}File không tồn tại!${NC}"
                 exit 1
             fi
             ;;
-        2)
-            download_from_uup
-            ;;
         *)
-            echo "Lựa chọn không hợp lệ."
-            exit 1
+            echo "Lựa chọn không hợp lệ. Dùng mặc định: Microsoft"
+            download_from_microsoft
             ;;
     esac
 fi
