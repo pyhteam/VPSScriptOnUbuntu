@@ -37,28 +37,45 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # 2. BẬT REPO VÀ CÀI ĐẶT GÓI
-echo -e "${YELLOW}[1/6] Cài đặt các gói phần mềm cần thiết...${NC}"
+echo -e "${YELLOW}[1/6] Kiểm tra và cài đặt gói phần mềm...${NC}"
 
-# Tắt hỏi xác nhận cho apt
-export DEBIAN_FRONTEND=noninteractive
+# Kiểm tra xem đã cài đủ gói chưa
+REQUIRED_PKGS="qemu-kvm libvirt-daemon-system virtinst swtpm ovmf aria2"
+MISSING_PKGS=""
+for pkg in $REQUIRED_PKGS; do
+    if ! dpkg -l | grep -q "^ii  $pkg "; then
+        MISSING_PKGS="$MISSING_PKGS $pkg"
+    fi
+done
 
-# Bật repo universe
-echo -e "  -> Bật repository universe..."
-add-apt-repository universe -y > /dev/null 2>&1
+if [ -z "$MISSING_PKGS" ]; then
+    echo -e "  ${GREEN}-> Các gói cần thiết đã được cài đặt. Bỏ qua.${NC}"
+else
+    echo -e "  -> Cần cài thêm:$MISSING_PKGS"
+    
+    # Tắt hỏi xác nhận cho apt
+    export DEBIAN_FRONTEND=noninteractive
 
-echo -e "  -> Đang cập nhật danh sách gói (apt update)..."
-apt-get update -y -qq
+    # Bật repo universe
+    echo -e "  -> Bật repository universe..."
+    add-apt-repository universe -y > /dev/null 2>&1
 
-echo -e "  -> Đang cài đặt các gói cần thiết (có thể mất 2-5 phút)..."
-apt-get install -y -qq qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virtinst swtpm swtpm-tools ovmf wget \
-aria2 cabextract wimtools chntpw genisoimage unzip file curl jq
+    echo -e "  -> Đang cập nhật danh sách gói (apt update)..."
+    apt-get update -y -qq
 
-check_error "Không thể cài đặt các gói phần mềm. Kiểm tra kết nối mạng."
-echo -e "  ${GREEN}-> Cài đặt gói hoàn tất!${NC}"
+    echo -e "  -> Đang cài đặt các gói cần thiết (có thể mất 2-5 phút)..."
+    apt-get install -y -qq qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virtinst swtpm swtpm-tools ovmf wget \
+    aria2 cabextract wimtools chntpw genisoimage unzip file curl jq
+
+    check_error "Không thể cài đặt các gói phần mềm. Kiểm tra kết nối mạng."
+    echo -e "  ${GREEN}-> Cài đặt gói hoàn tất!${NC}"
+fi
 
 # Kích hoạt dịch vụ ảo hóa
-echo -e "  -> Kích hoạt dịch vụ libvirtd..."
-systemctl enable --now libvirtd > /dev/null 2>&1
+if ! systemctl is-active --quiet libvirtd; then
+    echo -e "  -> Kích hoạt dịch vụ libvirtd..."
+    systemctl enable --now libvirtd > /dev/null 2>&1
+fi
 echo -e "  ${GREEN}-> Dịch vụ ảo hóa đã sẵn sàng!${NC}"
 
 # 3. TẢI VIRTIO DRIVER
@@ -75,20 +92,24 @@ fi
 
 # Hàm tải ISO trực tiếp từ Microsoft (NHANH & ỔN ĐỊNH)
 download_from_microsoft() {
-    echo -e "${YELLOW}--- TẢI WINDOWS 11 ISO TRỰC TIẾP TỪ MICROSOFT ---${NC}"
+    echo -e "${YELLOW}--- TẢI WINDOWS 11 ISO ---${NC}"
     
-    # Cài đặt jq nếu chưa có
-    apt install -y jq curl > /dev/null 2>&1
-    
-    echo "Đang lấy link tải từ Microsoft..."
-    
-    # Sử dụng Fido script để lấy link tải trực tiếp từ Microsoft
-    # Link này lấy Windows 11 Multi-edition ISO
+    # Kiểm tra nếu đã có file ISO
+    if [ -f "win11.iso" ]; then
+        FILE_SIZE=$(stat -c%s "win11.iso" 2>/dev/null || echo 0)
+        if [ "$FILE_SIZE" -gt 4000000000 ]; then
+            echo -e "${GREEN}Đã có file win11.iso (~$(($FILE_SIZE/1024/1024/1024))GB). Bỏ qua tải.${NC}"
+            WIN11_ISO_PATH="$(pwd)/win11.iso"
+            return 0
+        else
+            echo -e "${YELLOW}File win11.iso chưa hoàn chỉnh. Tiếp tục tải...${NC}"
+        fi
+    fi
     
     LANG_CODE="en-us"
     echo "Chọn ngôn ngữ:"
     echo "1. English (en-us) - Mặc định"
-    echo "2. Vietnamese (vi-vn)"
+    echo "2. Vietnamese (vi-vn)"  
     echo "3. Chinese Simplified (zh-cn)"
     read -p "Chọn (1/2/3) [Enter = English]: " LANG_CHOICE
     
@@ -100,81 +121,92 @@ download_from_microsoft() {
     
     echo -e "${GREEN}Ngôn ngữ: $LANG_CODE${NC}"
     
-    # Tải Fido script
-    echo "Đang tải công cụ Fido..."
-    curl -sL "https://raw.githubusercontent.com/pbatard/Fido/master/Fido.ps1" -o /tmp/Fido.ps1
-    
-    # Sử dụng phương pháp thay thế: tải từ link có sẵn
-    # Microsoft cung cấp link tải ISO qua trang chính thức
-    
-    echo -e "${YELLOW}Đang tạo link tải Windows 11...${NC}"
-    
-    # Tạo session và lấy link
-    SESSION_ID=$(curl -s "https://www.microsoft.com/en-us/api/controls/contentinclude/html?pageId=a8f8f489-4c7f-463a-9ca6-5cff94d8d041&host=www.microsoft.com&segments=software-download,windows11&query=&action=getskuinformationbyproductedition&sessionId=&productEditionId=2935&sdVersion=2" \
-        -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-        | grep -oP 'id="session-id" value="\K[^"]+' 2>/dev/null)
-    
-    if [ -z "$SESSION_ID" ]; then
-        echo -e "${YELLOW}Không lấy được session từ Microsoft. Dùng link backup...${NC}"
-        
-        # Sử dụng link từ các mirror đáng tin cậy
+    # Menu chọn nguồn - với retry loop
+    while true; do
         echo ""
         echo "Chọn nguồn tải:"
-        echo "1. Massgrave (Mirror nhanh, khuyên dùng)"
-        echo "2. Archive.org (Ổn định)"
+        echo "1. Massgrave (Mirror chính thức, khuyên dùng)"
+        echo "2. Archive.org (Backup)"
         echo "3. Nhập link ISO thủ công"
-        read -p "Chọn (1/2/3): " MIRROR_CHOICE
+        echo "4. Bỏ qua - dùng file ISO có sẵn trên máy"
+        read -p "Chọn (1/2/3/4): " MIRROR_CHOICE
         
         case $MIRROR_CHOICE in
             1)
-                # Link từ massgrave - Windows 11 23H2
-                ISO_URL="https://drive.massgrave.dev/Win11_23H2_English_x64v2.iso"
+                # Link từ massgrave - Windows 11 24H2 (mới nhất)
+                ISO_URL="https://drive.massgrave.dev/Win11_24H2_English_x64.iso"
                 if [ "$LANG_CODE" == "vi-vn" ]; then
-                    ISO_URL="https://drive.massgrave.dev/Win11_23H2_Vietnamese_x64.iso"
+                    ISO_URL="https://drive.massgrave.dev/Win11_24H2_Vietnamese_x64.iso"
                 elif [ "$LANG_CODE" == "zh-cn" ]; then
-                    ISO_URL="https://drive.massgrave.dev/Win11_23H2_Chinese_Simplified_x64.iso"
+                    ISO_URL="https://drive.massgrave.dev/Win11_24H2_Chinese_Simplified_x64.iso"
                 fi
                 ;;
             2)
-                # Link từ Archive.org
-                ISO_URL="https://archive.org/download/win-11-english-x-64v-2/Win11_23H2_English_x64v2.iso"
+                # Link từ Archive.org - đã cập nhật link mới
+                ISO_URL="https://dn721903.ca.archive.org/0/items/win-11-pro-english-x-64v-2025/Window%2011_Professional%20_X64.iso"
                 ;;
             3)
                 echo "Nhập link ISO Windows 11 (phải là link trực tiếp .iso):"
                 read -p "Link: " ISO_URL
+                if [ -z "$ISO_URL" ]; then
+                    echo -e "${RED}Link trống!${NC}"
+                    continue
+                fi
+                ;;
+            4)
+                read -p "Nhập đường dẫn file ISO trên máy: " WIN11_ISO_PATH
+                if [ -f "$WIN11_ISO_PATH" ]; then
+                    echo -e "${GREEN}Sử dụng: $WIN11_ISO_PATH${NC}"
+                    return 0
+                else
+                    echo -e "${RED}File không tồn tại!${NC}"
+                    continue
+                fi
                 ;;
             *)
-                ISO_URL="https://drive.massgrave.dev/Win11_23H2_English_x64v2.iso"
+                ISO_URL="https://drive.massgrave.dev/Win11_24H2_English_x64.iso"
                 ;;
         esac
-    fi
-    
-    if [ -z "$ISO_URL" ]; then
-        echo -e "${RED}Không có link tải!${NC}"
-        exit 1
-    fi
-    
-    echo -e "${GREEN}Link tải: $ISO_URL${NC}"
-    echo -e "${YELLOW}Đang tải Windows 11 ISO (~6GB)... Vui lòng đợi.${NC}"
-    
-    # Tải ISO với aria2c (nhanh hơn wget)
-    if command -v aria2c &> /dev/null; then
-        aria2c -x 16 -s 16 -k 1M --file-allocation=none \
-               --continue=true \
-               -o "win11.iso" \
-               "$ISO_URL"
-    else
-        wget --continue --show-progress -O "win11.iso" "$ISO_URL"
-    fi
-    
-    if [ ! -f "win11.iso" ] || [ $(stat -c%s "win11.iso" 2>/dev/null || echo 0) -lt 1000000000 ]; then
-        echo -e "${RED}Tải ISO thất bại hoặc file không hoàn chỉnh!${NC}"
-        rm -f win11.iso
-        exit 1
-    fi
-    
-    WIN11_ISO_PATH="$(pwd)/win11.iso"
-    echo -e "${GREEN}Tải thành công: $WIN11_ISO_PATH${NC}"
+        
+        echo -e "${GREEN}Link tải: $ISO_URL${NC}"
+        echo -e "${YELLOW}Đang tải Windows 11 ISO (~6GB)... Vui lòng đợi.${NC}"
+        echo -e "${YELLOW}(Nếu lỗi sẽ tự động hỏi chọn nguồn khác)${NC}"
+        
+        # Tải ISO với aria2c (hỗ trợ resume)
+        DOWNLOAD_SUCCESS=false
+        if command -v aria2c &> /dev/null; then
+            aria2c -x 16 -s 16 -k 1M \
+                   --file-allocation=none \
+                   --continue=true \
+                   --retry-wait=5 \
+                   --max-tries=3 \
+                   --timeout=60 \
+                   --connect-timeout=30 \
+                   -o "win11.iso" \
+                   "$ISO_URL" && DOWNLOAD_SUCCESS=true
+        else
+            wget --continue --show-progress --tries=3 --timeout=60 \
+                 -O "win11.iso" "$ISO_URL" && DOWNLOAD_SUCCESS=true
+        fi
+        
+        # Kiểm tra file tải về
+        if [ "$DOWNLOAD_SUCCESS" = true ] && [ -f "win11.iso" ]; then
+            FILE_SIZE=$(stat -c%s "win11.iso" 2>/dev/null || echo 0)
+            if [ "$FILE_SIZE" -gt 4000000000 ]; then
+                WIN11_ISO_PATH="$(pwd)/win11.iso"
+                echo -e "${GREEN}Tải thành công: $WIN11_ISO_PATH ($(($FILE_SIZE/1024/1024/1024))GB)${NC}"
+                return 0
+            fi
+        fi
+        
+        echo -e "${RED}Tải thất bại từ nguồn này!${NC}"
+        echo ""
+        read -p "Thử nguồn khác? (y/n): " RETRY
+        if [[ "$RETRY" != "y" && "$RETRY" != "Y" ]]; then
+            echo -e "${RED}Hủy tải ISO. Thoát script.${NC}"
+            exit 1
+        fi
+    done
 }
 
 # Hàm tải từ UUP Dump (backup)
